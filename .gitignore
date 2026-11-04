@@ -1,35 +1,51 @@
-# Gradle files
+# ===== Gradle =====
 .gradle/
 build/
 .kotlin/
+# gradle/wrapper/gradle-wrapper.jar 는 커밋해야 함 (무시하지 말 것)
 
-# Local configuration file (sdk path, etc)
+# ===== 로컬 설정 (SDK 경로 등, 개인별로 다름) =====
 local.properties
 
-# Log/OS Files
-*.log
-
-# Android Studio generated files and folders
+# ===== Android Studio / IntelliJ =====
+# IDE 설정은 개인별로 달라 충돌이 잦으므로 통째로 제외
+.idea/
+*.iml
+*.ipr
+*.iws
 captures/
 .externalNativeBuild/
 .cxx/
-*.aab
-*.apk
-output-metadata.json
-
-# IntelliJ
-*.iml
-.idea/
-misc.xml
+.navigation/
 deploymentTargetDropDown.xml
 render.experimental.xml
 
-# Keystore files
+# ===== 빌드 산출물 =====
+*.apk
+*.aab
+*.apks
+*.ap_
+*.dex
+*.class
+output-metadata.json
+release/
+
+# ===== 서명 키 (절대 커밋 금지) =====
 *.jks
 *.keystore
+keystore.properties
 
-# Google Services (e.g. APIs or Firebase)
+# ===== API 키 / 비밀 정보 =====
 google-services.json
+secrets.properties
+.env
 
-# Android Profiling
+# ===== 로그 / 프로파일링 =====
+*.log
 *.hprof
+
+# ===== OS / 기타 에디터 =====
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
