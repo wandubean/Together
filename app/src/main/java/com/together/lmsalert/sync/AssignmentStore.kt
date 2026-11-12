@@ -1,6 +1,7 @@
 package com.together.lmsalert.sync
 
 import com.together.lmsalert.lms.model.LmsAssignment
+import com.together.lmsalert.lms.model.LmsAnnouncement
 import com.together.lmsalert.lms.model.LmsFetchResult
 import com.together.lmsalert.lms.model.SubmissionState
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -42,6 +43,10 @@ class InMemoryAssignmentStore : AssignmentStore {
     private val mutex = Mutex()
     private val assignments = MutableStateFlow<Map<Long, LmsAssignment>>(emptyMap())
     private var lastSyncedAt: Instant? = null
+    private val announcements = MutableStateFlow<Map<Long, LmsAnnouncement>>(emptyMap())
+    private val syncedAt = MutableStateFlow<Instant?>(null)
+    val announcementsFlow: StateFlow<Map<Long, LmsAnnouncement>> = announcements.asStateFlow()
+    val lastSyncedAtFlow: StateFlow<Instant?> = syncedAt.asStateFlow()
 
     /** 개발용 화면에서 확인하기 위한 스트림. */
     val assignmentsFlow: StateFlow<Map<Long, LmsAssignment>> = assignments.asStateFlow()
@@ -65,7 +70,15 @@ class InMemoryAssignmentStore : AssignmentStore {
             }
             changes.removed.forEach { next.remove(it.id) }
             assignments.value = next
+            val nextAnnouncements = announcements.value.toMutableMap()
+            val currentIds = result.announcements.map { it.id }.toSet()
+            nextAnnouncements.entries.removeAll { (id, notice) ->
+                notice.courseId in result.fetchedAnnouncementCourseIds && id !in currentIds
+            }
+            result.announcements.forEach { nextAnnouncements[it.id] = it }
+            announcements.value = nextAnnouncements
             lastSyncedAt = result.fetchedAt
+            syncedAt.value = result.fetchedAt
         }
     }
 }

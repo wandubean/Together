@@ -65,7 +65,8 @@ class LmsSyncWorker(
                     putInt(KEY_NEW, changes.newAssignments.size)
                     putInt(KEY_DUE_CHANGED, changes.dueDateChanged.size)
                     putInt(KEY_REMOVED, changes.removed.size)
-                    putInt(KEY_FAILED_COURSES, fetched.failedCourseIds.size)
+                    putInt(KEY_FAILED_COURSES, (fetched.failedCourseIds + fetched.failedAnnouncementCourseIds).size)
+                    putInt(KEY_ANNOUNCEMENTS, fetched.announcements.size)
                 }
             )
         } catch (e: LmsAuthException) {
@@ -110,6 +111,7 @@ class LmsSyncWorker(
         const val KEY_OUTCOME = "outcome"
         const val KEY_SYNCED_AT = "synced_at"
         const val KEY_TOTAL = "total"
+        const val KEY_ANNOUNCEMENTS = "announcements"
         const val KEY_NEW = "new"
         const val KEY_DUE_CHANGED = "due_changed"
         const val KEY_REMOVED = "removed"

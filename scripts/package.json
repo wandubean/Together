@@ -1,0 +1,6 @@
+{
+  "private": true,
+  "type": "module",
+  "scripts": { "test": "node --test lms-fetch.test.mjs" },
+  "dependencies": { "playwright-core": "^1.56.0" }
+}

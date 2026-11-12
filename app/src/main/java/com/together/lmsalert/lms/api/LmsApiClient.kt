@@ -2,6 +2,7 @@ package com.together.lmsalert.lms.api
 
 import com.together.lmsalert.lms.LmsConfig
 import com.together.lmsalert.lms.model.LmsAssignment
+import com.together.lmsalert.lms.model.LmsAnnouncement
 import com.together.lmsalert.lms.model.LmsCourse
 import com.together.lmsalert.lms.model.LmsFetchResult
 import kotlinx.coroutines.Dispatchers
@@ -60,6 +61,14 @@ class LmsApiClient(
             }
         ).filter { it.published }.map { it.toModel(course) }
 
+    suspend fun fetchAnnouncements(course: LmsCourse): List<LmsAnnouncement> =
+        getPaged<CanvasAnnouncementDto>(
+            apiUrl("courses/${course.id}/discussion_topics") {
+                addQueryParameter("only_announcements", "true")
+                addQueryParameter("order_by", "recent_activity")
+            }
+        ).filter { it.published }.map { it.toModel(course) }
+
     /**
      * 수강 중인 모든 과목의 과제를 가져온다.
      * 과목 목록 조회 실패는 전체 실패로 보고 예외를 던지고,
@@ -70,6 +79,9 @@ class LmsApiClient(
         val assignments = mutableListOf<LmsAssignment>()
         val fetched = mutableSetOf<Long>()
         val failed = mutableSetOf<Long>()
+        val announcements = mutableListOf<LmsAnnouncement>()
+        val fetchedAnnouncements = mutableSetOf<Long>()
+        val failedAnnouncements = mutableSetOf<Long>()
 
         for (course in courses) {
             try {
@@ -82,6 +94,16 @@ class LmsApiClient(
             } catch (_: SerializationException) {
                 failed += course.id
             }
+            try {
+                announcements += fetchAnnouncements(course)
+                fetchedAnnouncements += course.id
+            } catch (e: LmsAuthException) {
+                throw e
+            } catch (_: IOException) {
+                failedAnnouncements += course.id
+            } catch (_: SerializationException) {
+                failedAnnouncements += course.id
+            }
         }
 
         return LmsFetchResult(
@@ -90,6 +112,9 @@ class LmsApiClient(
             fetchedCourseIds = fetched,
             failedCourseIds = failed,
             fetchedAt = Instant.now(),
+            announcements = announcements,
+            fetchedAnnouncementCourseIds = fetchedAnnouncements,
+            failedAnnouncementCourseIds = failedAnnouncements,
         )
     }
 
@@ -109,9 +134,14 @@ class LmsApiClient(
         while (next != null && pages < LmsConfig.MAX_PAGES) {
             val page = get(next)
             items += json.decodeFromString<List<T>>(page.body)
-            next = parseNextLink(page.linkHeader)?.takeIf { it.host == baseUrl.host }
+            next = parseNextLink(page.linkHeader)?.also {
+                if (it.host != baseUrl.host || it.scheme != baseUrl.scheme || it.port != baseUrl.port) {
+                    throw IOException("잘못된 다음 페이지 주소")
+                }
+            }
             pages++
         }
+        if (next != null) throw IOException("페이지 상한 초과: 조회 결과가 불완전합니다")
         return items
     }
 
@@ -125,7 +155,7 @@ class LmsApiClient(
 
         http.newCall(request).execute().use { response ->
             when {
-                response.code == 401 || response.code == 403 ->
+                response.code == 401 || (response.code == 403 && url.encodedPath.endsWith("/users/self")) ->
                     throw LmsAuthException("인증 필요 (HTTP ${response.code})")
                 !response.isSuccessful ->
                     throw LmsHttpException(response.code, "LMS 오류 (HTTP ${response.code})")

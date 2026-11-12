@@ -2,13 +2,17 @@ package com.together.lmsalert.ui
 
 import android.content.Intent
 import android.net.Uri
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
@@ -91,6 +95,7 @@ import androidx.work.WorkInfo
 import com.together.lmsalert.AppContainer
 import com.together.lmsalert.lms.auth.LmsLoginScreen
 import com.together.lmsalert.lms.model.LmsAssignment
+import com.together.lmsalert.lms.model.LmsAnnouncement
 import com.together.lmsalert.lms.model.SubmissionState
 import com.together.lmsalert.sync.InMemoryAssignmentStore
 import com.together.lmsalert.sync.LmsSyncWorker
@@ -125,6 +130,12 @@ fun AppScreen(container: AppContainer) {
     val assignments by ((container.assignmentStore as? InMemoryAssignmentStore)
         ?.assignmentsFlow?.collectAsState() ?: remember { mutableStateOf(emptyMap()) })
     val manualWork by container.syncScheduler.observeManualSync().collectAsState(initial = null)
+    val store = container.assignmentStore as? InMemoryAssignmentStore
+    val announcements by (store?.announcementsFlow?.collectAsState()
+        ?: remember { mutableStateOf(emptyMap<Long, LmsAnnouncement>()) })
+    val lastSyncedAt by (store?.lastSyncedAtFlow?.collectAsState()
+        ?: remember { mutableStateOf<Instant?>(null) })
+    var selectedAnnouncement by remember { mutableStateOf<LmsAnnouncement?>(null) }
     var tab by rememberSaveable { mutableStateOf(AppTab.HOME) }
     var selectedAssignmentId by rememberSaveable { mutableStateOf<Long?>(null) }
     var showLogin by rememberSaveable { mutableStateOf(false) }
@@ -156,6 +167,27 @@ fun AppScreen(container: AppContainer) {
         return
     }
 
+    selectedAnnouncement?.let { notice ->
+        AlertDialog(
+            onDismissRequest = { selectedAnnouncement = null },
+            title = { Text(notice.title) },
+            text = {
+                Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text(notice.courseName, color = MutedInk)
+                    Text(stripHtml(notice.message).ifBlank { "등록된 내용이 없습니다." })
+                }
+            },
+            confirmButton = {
+                notice.htmlUrl?.let { url ->
+                    TextButton(onClick = { context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }) {
+                        Text("LMS에서 보기")
+                    }
+                }
+            },
+            dismissButton = { TextButton(onClick = { selectedAnnouncement = null }) { Text("닫기") } },
+        )
+    }
+
     Scaffold(
         containerColor = Canvas,
         bottomBar = {
@@ -173,6 +205,9 @@ fun AppScreen(container: AppContainer) {
         when (tab) {
             AppTab.HOME -> HomeScreen(
                 assignments = assignments.values.toList(),
+                announcements = announcements.values.toList(),
+                lastSyncedAt = lastSyncedAt,
+                onAnnouncementClick = { selectedAnnouncement = it },
                 manualWork = manualWork,
                 onRefresh = { container.syncScheduler.syncNow() },
                 onAssignmentClick = { selectedAssignmentId = it.id },
@@ -195,7 +230,7 @@ fun AppScreen(container: AppContainer) {
 }
 
 @Composable
-private fun NavItem(tab: AppTab, selected: AppTab, icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, onSelect: (AppTab) -> Unit) {
+private fun RowScope.NavItem(tab: AppTab, selected: AppTab, icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, onSelect: (AppTab) -> Unit) {
     NavigationBarItem(
         selected = tab == selected,
         onClick = { onSelect(tab) },
@@ -207,6 +242,9 @@ private fun NavItem(tab: AppTab, selected: AppTab, icon: androidx.compose.ui.gra
 @Composable
 private fun HomeScreen(
     assignments: List<LmsAssignment>,
+    announcements: List<LmsAnnouncement>,
+    lastSyncedAt: Instant?,
+    onAnnouncementClick: (LmsAnnouncement) -> Unit,
     manualWork: WorkInfo?,
     onRefresh: () -> Unit,
     onAssignmentClick: (LmsAssignment) -> Unit,
@@ -214,13 +252,14 @@ private fun HomeScreen(
     modifier: Modifier = Modifier,
 ) {
     val sorted = assignments.sortedBy { it.dueAt ?: Instant.MAX }
-    val urgentCount = sorted.count { it.dueAt?.isBefore(Instant.now().plusSeconds(3 * 24 * 60 * 60)) == true }
-    val lastSynced = manualWork?.outputData?.getLong(LmsSyncWorker.KEY_SYNCED_AT, 0L)?.takeIf { it > 0 }
-        ?.let { formatTime(Instant.ofEpochMilli(it)) }
+    val now = Instant.now()
+    val urgentCount = sorted.count { it.isDueSoon(now) }
+    val lastSynced = lastSyncedAt?.let(::formatTime)
     val syncing = manualWork?.state == WorkInfo.State.RUNNING || manualWork?.state == WorkInfo.State.ENQUEUED
 
+    RefreshableHome(isRefreshing = syncing, onRefresh = onRefresh, modifier = modifier) {
     LazyColumn(
-        modifier = modifier.fillMaxSize(),
+        modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 18.dp, bottom = 24.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
@@ -242,10 +281,11 @@ private fun HomeScreen(
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) {
                                 Text("마감이 다가오는 과제", color = Color.White.copy(alpha = .8f), style = MaterialTheme.typography.bodyMedium)
-                                Text("$urgentCount개", color = Color.White, style = MaterialTheme.typography.headlineLarge)
+                                Text("${urgentCount}개", color = Color.White, style = MaterialTheme.typography.headlineLarge)
                             }
                             IconButton(
                                 onClick = onRefresh,
+                                enabled = !syncing,
                                 modifier = Modifier.size(48.dp).clip(CircleShape).background(Color.White.copy(alpha = .18f)),
                             ) {
                                 if (syncing) CircularProgressIndicator(Modifier.size(22.dp), color = Color.White, strokeWidth = 2.dp)
@@ -267,7 +307,18 @@ private fun HomeScreen(
             }
         }
         if (manualWork?.state == WorkInfo.State.FAILED) {
-            item { SyncMessage(manualWork) }
+            item {
+                Column {
+                    SyncMessage(manualWork)
+                    if (LmsSyncWorker.outcomeOf(manualWork.outputData) == com.together.lmsalert.sync.SyncOutcome.AUTH_REQUIRED) {
+                        TextButton(onClick = onLogin) { Text("LMS 로그인") }
+                    }
+                }
+            }
+        }
+        if (manualWork?.state == WorkInfo.State.SUCCEEDED &&
+            manualWork.outputData.getInt(LmsSyncWorker.KEY_FAILED_COURSES, 0) > 0) {
+            item { Text("일부 과목을 갱신하지 못했어요. 기존 정보를 유지했어요. 아래로 당겨 다시 시도해 주세요.", color = Amber) }
         }
         item {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -290,12 +341,35 @@ private fun HomeScreen(
                 AssignmentCard(assignment, onClick = { onAssignmentClick(assignment) })
             }
         }
+        item {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("과목 공지", style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+                Text("${announcements.size}개", color = MutedInk)
+            }
+        }
+        if (announcements.isEmpty()) {
+            item { Text("등록된 공지가 없어요. 아래로 당겨 최신 정보를 가져오세요.", color = MutedInk) }
+        }
+        items(announcements.sortedByDescending { it.postedAt ?: Instant.MIN }, key = { "notice_${it.id}" }) { notice ->
+            Card(Modifier.fillMaxWidth().clickable { onAnnouncementClick(notice) },
+                shape = RoundedCornerShape(18.dp), colors = CardDefaults.cardColors(containerColor = Color.White)) {
+                Column(Modifier.padding(17.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(notice.courseName, color = MutedInk, style = MaterialTheme.typography.labelSmall)
+                    Text(notice.title, style = MaterialTheme.typography.titleMedium)
+                    Text(stripHtml(notice.message), color = MutedInk, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    notice.postedAt?.let { Text(formatTime(it), color = MutedInk, style = MaterialTheme.typography.labelSmall) }
+                }
+            }
+        }
+    }
     }
 }
 
 @Composable
 private fun AssignmentCard(assignment: LmsAssignment, onClick: () -> Unit) {
-    val urgent = assignment.dueAt?.isBefore(Instant.now().plusSeconds(3 * 24 * 60 * 60)) == true
+    val now = Instant.now()
+    val urgent = assignment.isDueSoon(now)
+    val overdue = assignment.dueAt?.isBefore(now) == true
     Card(
         Modifier.fillMaxWidth().clickable(onClick = onClick),
         shape = RoundedCornerShape(18.dp),
@@ -309,7 +383,12 @@ private fun AssignmentCard(assignment: LmsAssignment, onClick: () -> Unit) {
                     Text(assignment.name, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 }
                 StatusPill(
-                    text = if (urgent) "임박" else "예정",
+                    text = when {
+                        assignment.submissionState == SubmissionState.SUBMITTED -> "제출됨"
+                        overdue -> "마감 지남"
+                        urgent -> "임박"
+                        else -> "예정"
+                    },
                     tint = if (urgent) AmberTint else BlueTint,
                     content = if (urgent) Amber else Blue,
                 )
@@ -326,8 +405,10 @@ private fun AssignmentCard(assignment: LmsAssignment, onClick: () -> Unit) {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun AssignmentDetail(assignment: LmsAssignment, onBack: () -> Unit, onOpenLink: (String) -> Unit) {
+    BackHandler(onBack = onBack)
     var markedDone by remember { mutableStateOf(false) }
     Scaffold(
         containerColor = Canvas,

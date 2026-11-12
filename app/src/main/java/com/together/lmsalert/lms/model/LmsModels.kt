@@ -38,10 +38,23 @@ data class LmsAssignment(
  * 일부 과목만 조회에 실패할 수 있으므로 성공/실패 과목을 따로 기록한다.
  * → 실패한 과목의 과제는 '삭제'로 판단하지 않기 위함 (기획서 2.2).
  */
+data class LmsAnnouncement(
+    val id: Long,
+    val courseId: Long,
+    val courseName: String,
+    val title: String,
+    val message: String?,
+    val postedAt: Instant?,
+    val htmlUrl: String?,
+)
+
 data class LmsFetchResult(
     val courses: List<LmsCourse>,
     val assignments: List<LmsAssignment>,
     val fetchedCourseIds: Set<Long>,
     val failedCourseIds: Set<Long>,
     val fetchedAt: Instant,
+    val announcements: List<LmsAnnouncement> = emptyList(),
+    val fetchedAnnouncementCourseIds: Set<Long> = emptySet(),
+    val failedAnnouncementCourseIds: Set<Long> = emptySet(),
 )

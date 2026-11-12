@@ -1,6 +1,7 @@
 package com.together.lmsalert.lms.api
 
 import com.together.lmsalert.lms.model.LmsAssignment
+import com.together.lmsalert.lms.model.LmsAnnouncement
 import com.together.lmsalert.lms.model.LmsCourse
 import com.together.lmsalert.lms.model.SubmissionState
 import kotlinx.serialization.SerialName
@@ -43,6 +44,22 @@ data class CanvasSubmissionDto(
     /** unsubmitted / submitted / pending_review / graded */
     @SerialName("workflow_state") val workflowState: String? = null,
     @SerialName("submitted_at") val submittedAt: String? = null,
+)
+
+@Serializable
+data class CanvasAnnouncementDto(
+    val id: Long,
+    val title: String? = null,
+    val message: String? = null,
+    @SerialName("posted_at") val postedAt: String? = null,
+    @SerialName("html_url") val htmlUrl: String? = null,
+    val published: Boolean = true,
+)
+
+internal fun CanvasAnnouncementDto.toModel(course: LmsCourse) = LmsAnnouncement(
+    id = id, courseId = course.id, courseName = course.name,
+    title = title ?: "(제목 없음)", message = message,
+    postedAt = parseInstant(postedAt), htmlUrl = htmlUrl,
 )
 
 internal fun CanvasCourseDto.toModelOrNull(): LmsCourse? {

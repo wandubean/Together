@@ -39,6 +39,8 @@ keystore.properties
 google-services.json
 secrets.properties
 .env
+.local/
+node_modules/
 
 # ===== 로그 / 프로파일링 =====
 *.log
